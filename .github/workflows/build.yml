@@ -1,0 +1,92 @@
+name: Build miro Kernel
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout optimization
+        uses: actions/checkout@v4
+        with:
+          path: miro-opt
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libncurses-dev \
+            libssl-dev libelf-dev libdw-dev cpio rsync zip \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu ccache
+
+      - name: Cache kernel source
+        id: cache-kernel
+        uses: actions/cache@v4
+        with:
+          path: kernel
+          key: miro-kernel-src-${{ github.run_id }}
+          restore-keys: miro-kernel-src-
+
+      - name: Clone Xiaomi kernel source (bsp-miro-v-oss)
+        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 -b bsp-miro-v-oss \
+            https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git kernel
+
+      - name: Install miro optimization
+        run: |
+          cd kernel
+          bash "$GITHUB_WORKSPACE/miro-opt/install.sh"
+
+      - name: Configure kernel
+        run: |
+          cd kernel
+          export ARCH=arm64
+          if ls arch/arm64/configs/*miro*consolidate*defconfig 1>/dev/null 2>&1; then
+            echo "Using miro_consolidate_defconfig"
+            make CROSS_COMPILE=aarch64-linux-gnu- miro_consolidate_defconfig
+          elif [ -f arch/arm64/configs/vendor/miro_consolidate.config ]; then
+            BASE=$(basename $(ls arch/arm64/configs/*_defconfig | head -1) _defconfig)
+            echo "Merging vendor fragment onto ${BASE}_defconfig"
+            ./scripts/kconfig/merge_config.sh -m -O . \
+              arch/arm64/configs/${BASE}_defconfig \
+              arch/arm64/configs/vendor/miro_consolidate.config
+            make CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          else
+            echo "ERROR: no miro config found" && exit 1
+          fi
+          grep -E "CONFIG_UNFAIR_SCHED|CONFIG_SUN_POWER|CONFIG_SUN_IDLE|CONFIG_WALT_SUN" .config || true
+
+      - name: Build kernel
+        run: |
+          cd kernel
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" 2>&1 | tail -300
+
+      - name: Collect build outputs
+        run: |
+          mkdir -p out
+          if [ -f kernel/arch/arm64/boot/Image ]; then
+            cp kernel/arch/arm64/boot/Image out/
+          fi
+          mkdir -p out/dtbs
+          find kernel/arch/arm64/boot/dts -name '*.dtb' -exec cp {} out/dtbs/ \; 2>/dev/null || true
+
+      - name: Upload kernel Image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: miro-kernel-Image
+          path: out/Image
+          if-no-files-found: warn
+
+      - name: Upload dtbs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: miro-kernel-dtbs
+          path: out/dtbs/
+          if-no-files-found: warn

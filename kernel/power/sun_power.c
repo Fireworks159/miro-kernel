@@ -329,9 +329,9 @@ static int sun_power_proc_show(struct seq_file *m, void *v)
 
 	for (i = 0; i < sun_power_data.num_clusters; i++) {
 		struct sun_cluster_info *ci = &sun_power_data.clusters[i];
-		seq_printf(m, "%-5d %-20*pb %-10u %-10u %-10u %-10d\n",
+		seq_printf(m, "%-5d %*pb %-10u %-10u %-10u %-10d\n",
 			   ci->cluster_id,
-			   ci->cpus,
+			   cpumask_pr_args(ci->cpus),
 			   ci->min_freq,
 			   ci->max_freq,
 			   ci->idle_freq,

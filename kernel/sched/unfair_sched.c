@@ -270,7 +270,7 @@ int unfair_sched_select_cpu(struct task_struct *p, int prev_cpu,
 		return prev_cpu;
 
 	if (unfair_sched_data.prefer_big_core_fg && boost >= FAVOR_BOOST_MAX / 2) {
-		int big_cpu = cpumask_last(cpu_top_mask());
+		int big_cpu = cpumask_last(cpu_online_mask);
 		if (cpumask_test_cpu(big_cpu, cpumask))
 			cpu = big_cpu;
 	}
@@ -343,7 +343,7 @@ static int unfair_sched_proc_open(struct inode *inode, struct file *file)
 
 static ssize_t unfair_sched_proc_write(struct file *file,
 				       const char __user *buf,
-			       size_t count, loff_t *ppos)
+				       size_t count, loff_t *ppos)
 {
 	char kbuf[64];
 	int val;

@@ -30,7 +30,6 @@ static struct hrtimer input_boost_timer;
 static struct workqueue_struct *sun_power_wq;
 
 static struct work_struct input_boost_end_work;
-static struct work_struct wakelock_cleanup_work;
 
 static int get_cluster_for_cpu(int cpu)
 {
@@ -413,9 +412,10 @@ static const struct proc_ops sun_power_proc_ops = {
 static int sun_power_input_notifier(struct notifier_block *nb,
 				    unsigned long action, void *data)
 {
-	struct input_dev *dev = input_get_device((struct input_handle *)data);
+	struct input_handle *handle = data;
+	struct input_dev *dev = handle ? handle->dev : NULL;
 
-	if (action == INPUT_OPEN || action == INPUT_EVOKE) {
+	if (action == INPUT_OPEN) {
 		if (dev && test_bit(EV_KEY, dev->evbit))
 			sun_power_input_boost();
 	}
@@ -454,7 +454,6 @@ int __init sun_power_init(void)
 	}
 
 	INIT_WORK(&input_boost_end_work, input_boost_end_work_func);
-	INIT_WORK(&wakelock_cleanup_work, NULL);
 
 	hrtimer_init(&input_boost_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	input_boost_timer.function = input_boost_timer_func;

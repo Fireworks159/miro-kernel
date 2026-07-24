@@ -112,17 +112,18 @@ if [ -f "$FAIR_C" ] && ! grep -q "unfair_sched" "$FAIR_C"; then
     # 在文件头部添加 include
     sed -i '/#include <linux\/migrate.h>/a #include <linux\/unfair_sched.h>' "$FAIR_C"
 
-    # 在 check_preempt_tick 函数的 ideal_runtime 赋值前插入 boost 逻辑
-    # 找到 "ideal_runtime = sched_slice" 这行，在它前面插入
-    sed -i '/ideal_runtime = sched_slice/i\
-\tif (unfair_sched_is_favored(curr)) {\
-\t\tunsigned long us_slice = unfair_sched_adjust_slice(curr, sched_slice(cfs_rq, curr));\
-\t\tif (delta_exec < us_slice)\
-\t\t\treturn;\
-\t}' "$FAIR_C"
+    # 在 check_preempt_tick 函数的 ideal_runtime 赋值后插入 boost 逻辑
+    # 插入在 "ideal_runtime = sched_slice" 之后，使用自包含代码（不依赖局部变量）
+    sed -i '/ideal_runtime = sched_slice/a\
+	if (unfair_sched_is_favored(curr)) {\
+		unsigned long us_slice = unfair_sched_adjust_slice(curr, ideal_runtime);\
+		u64 us_delta = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;\
+		if (us_delta < us_slice)\
+			return;\
+	}' "$FAIR_C"
 
     # 在 wakeup_preempt_entity 中 vdiff > 0 的分支内追加 gran 调整
-    sed -i '/if (vdiff > 0) {/a\\t\tgran += unfair_sched_adjust_wakeup_gran(task_of(se));' "$FAIR_C"
+    sed -i '/if (vdiff > 0) {/a\		gran += unfair_sched_adjust_wakeup_gran(task_of(se));' "$FAIR_C"
 
     echo "[5/5] fair.c 已修改"
 else

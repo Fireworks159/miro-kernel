@@ -58,33 +58,31 @@ static int sun_idle_select(struct cpuidle_driver *drv,
 			   struct cpuidle_device *dev,
 			   bool *stop_tick)
 {
-	int state;
-	int i;
+	int target_state = 0;
+	int deepest_state;
 	s64 predicted_idle_us;
-	s64 actual_residency;
 
 	if (!sun_idle.enabled)
 		return -ENODEV;
 
-	state = cpuidle_curr_governor()->select(drv, dev, stop_tick);
-	if (state < 0)
-		return state;
+	deepest_state = drv->state_count - 1;
+	if (deepest_state < 0)
+		return 0;
 
 	spin_lock(&sun_idle.lock);
 
-	if (sun_idle.aggressive_promotion) {
-		int deepest_state = drv->state_count - 1;
-		int target_state = state;
+	target_state = 0;
 
-		for (i = state + 1; i <= deepest_state; i++) {
+	if (sun_idle.aggressive_promotion) {
+		for (target_state = deepest_state; target_state > 0;
+		     target_state--) {
 			unsigned int adjusted_residency;
 
-			adjusted_residency = drv->states[i].exit_latency *
+			adjusted_residency = drv->states[target_state].exit_latency *
 				sun_idle.min_residency_multiplier / 100;
 
-			if (adjusted_residency < drv->states[i].target_residency) {
-				target_state = i;
-			}
+			if (adjusted_residency <= drv->states[target_state].target_residency)
+				break;
 		}
 
 		if (sun_idle.use_deeper_idle && target_state < deepest_state) {
@@ -94,27 +92,26 @@ static int sun_idle_select(struct cpuidle_driver *drv,
 			if (predicted_idle_us > sun_idle.promotion_threshold_us)
 				target_state = deepest_state;
 		}
-
-		state = target_state;
 	}
 
-	if (!sun_idle.deep_idle_enabled && state > 1)
-		state = 1;
+	if (!sun_idle.deep_idle_enabled && target_state > 1)
+		target_state = 1;
 
 	if (sun_idle.idle_cutoff_us > 0) {
-		s64 expected_idle = dev->last_residency_ns / 1000;
-		if (expected_idle < sun_idle.idle_cutoff_us)
-			state = 0;
+		predicted_idle_us = ktime_us_delta(
+			ktime_get(), sun_idle.last_wakeup_time);
+		if (predicted_idle_us < sun_idle.idle_cutoff_us)
+			target_state = 0;
 	}
+
+	if (target_state >= drv->state_count)
+		target_state = drv->state_count - 1;
+	if (target_state < 0)
+		target_state = 0;
 
 	spin_unlock(&sun_idle.lock);
 
-	if (state >= drv->state_count)
-		state = drv->state_count - 1;
-	if (state < 0)
-		state = 0;
-
-	return state;
+	return target_state;
 }
 
 static void sun_idle_reflect(struct cpuidle_device *dev, int index)
